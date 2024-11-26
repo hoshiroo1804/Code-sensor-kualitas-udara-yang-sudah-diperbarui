@@ -1,0 +1,105 @@
+#define BLYNK_TEMPLATE_ID "TMPL6jcbmReCU"
+#define BLYNK_TEMPLATE_NAME "kodingan dua"
+#define BLYNK_AUTH_TOKEN "lkF3Pi10Nf8zSLP3Gec3xpqWHgsuORLS"
+#include "MQ7.h"
+#include <GP2Y1010AU0F.h>
+#include <MQ135.h>
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+
+
+// Blynk credentials
+char auth[] = BLYNK_AUTH_TOKEN;  // Masukkan token autentikasi Blynk
+char ssid[] = "NYAHAHAHA";   // Masukkan nama jaringan WiFi
+char pass[] = "iyaiyaiyaiyaiya"; // Masukkan password jaringan WiFi
+
+// Pin untuk sensor MQ7
+#define A_PIN 32
+#define VOLTAGE 5
+MQ7 mq7(A_PIN, VOLTAGE);   // Inisialisasi MQ7
+
+// Pin untuk sensor GP2Y1010AU0F
+int measurePin = 34;
+int ledPin     = 5;
+GP2Y1010AU0F dustSensor(ledPin, measurePin);
+
+// Pin untuk sensor MQ135
+#define PIN_MQ135 35
+MQ135 mq135_sensor(PIN_MQ135);
+
+// Variabel untuk pengukuran GP2Y1010AU0F
+float dustDensity = 0;
+float dustSum = 0;
+int sampleCount = 0;
+
+// Variabel untuk pengukuran MQ135
+float temperature = 31;
+float humidity = 90;
+
+void setup() {
+    Serial.begin(115200);
+    Blynk.begin(auth, ssid, pass);
+    Serial.println(F("Combined Sensor Reading: MQ7, GP2Y1010AU0F, and MQ135"));
+
+    // Kalibrasi MQ7
+    Serial.println("Calibrating MQ7");
+    mq7.calibrate();
+    Serial.println("Calibration done for MQ7!");
+
+    // Inisialisasi sensor debu
+    dustSensor.begin();
+
+    // Kalibrasi RZero untuk MQ135
+    float correctedRZero = mq135_sensor.getCorrectedRZero(temperature, humidity);
+    Serial.print("Kalibrasi RZero MQ135: ");
+    Serial.println(correctedRZero);
+}
+
+void loop() {
+    Blynk.run();
+
+    // Pembacaan sensor MQ7
+    float ppmCO = mq7.readPpm();
+    Serial.print("PPM CO MQ7 = ");
+    Serial.println(ppmCO);
+    Blynk.virtualWrite(V1, ppmCO); // Mengirim data CO ke Blynk Virtual Pin V0
+
+    // Pembacaan sensor GP2Y1010AU0F
+    dustDensity = dustSensor.read();
+    dustSum += dustDensity;
+    sampleCount++;
+
+    Serial.print("Sample ");
+    Serial.print(sampleCount);
+    Serial.print(" - Dust Density = ");
+    Serial.print(dustDensity);
+    Serial.println(" ug/m3");
+
+    // Jika sudah 5 sampel (5 detik), hitung rata-rata
+    if (sampleCount == 5) {
+        float dustAverage = dustSum / sampleCount;
+        Serial.print("5-Second Average Dust Density = ");
+        Serial.print(dustAverage);
+        Serial.println(" ug/m3");
+
+        Blynk.virtualWrite(V2, dustAverage); // Mengirim data debu ke Blynk Virtual Pin V1
+
+        dustSum = 0;
+        sampleCount = 0;
+    }
+
+    // Pembacaan sensor MQ135 setiap 500 ms
+    float resistance = mq135_sensor.getResistance();
+    float correctedPPM = mq135_sensor.getCorrectedPPM(temperature, humidity);
+
+    Serial.print("Resistansi MQ135: ");
+    Serial.print(resistance);
+    Serial.print(" kOhm\t");
+    Serial.print("Corrected PPM CO2: ");
+    Serial.print(correctedPPM);
+    Serial.println(" ppm");
+
+    Blynk.virtualWrite(V0, correctedPPM); // Mengirim data CO2 ke Blynk Virtual Pin V2
+
+    delay(1000);
+}
