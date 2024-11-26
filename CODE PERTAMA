@@ -1,0 +1,129 @@
+#define BLYNK_TEMPLATE_ID "TMPL62L6baztS"
+#define BLYNK_TEMPLATE_NAME "kodingan pertama"
+#define BLYNK_AUTH_TOKEN "0UahlY0Y1glAvCPqH-5RzWHcMkSlVLFH"
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <MQUnifiedsensor.h>
+#include <GP2Y1010sensor.h>
+
+// WiFi and Blynk credentials
+char auth[] = BLYNK_AUTH_TOKEN;  
+char ssid[] = "NYAHAHAHA";   
+char pass[] = "iyaiyaiyaiyaiya";
+
+// Definitions for MQ135
+#define placa "Arduino UNO"
+#define Voltage_Resolution 5
+#define MQ135_pin 35 
+#define MQ135_type "MQ-135" 
+#define ADC_Bit_Resolution 12 
+#define RatioMQ135CleanAir 1.11
+
+// Definitions for MQ7
+#define MQ7_pin 32 
+#define MQ7_type "MQ-7" 
+#define RatioMQ7CleanAir 27.5 
+
+// Definitions for dust sensor
+const int sharpLEDPin = 5; 
+const int sharpVoPin = 34; 
+static float Voc = 0.6; 
+const float K = 10; 
+#define N 200
+
+GP2Y1010sensor GP2;
+
+// Declare MQ135 and MQ7 Sensors
+MQUnifiedsensor MQ135(placa, Voltage_Resolution, ADC_Bit_Resolution, MQ135_pin, MQ135_type);
+MQUnifiedsensor MQ7(placa, Voltage_Resolution, ADC_Bit_Resolution, MQ7_pin, MQ7_type);
+
+// Timer variables
+unsigned long lastReadTime = 0; 
+const unsigned long readInterval = 1000; 
+
+void setup() {
+  Serial.begin(9600);
+  Blynk.begin(auth, ssid, pass); // Initialize Blynk
+
+  MQ135.setRegressionMethod(1);
+  MQ135.setA(605.18); MQ135.setB(-3.937);
+  MQ135.init();
+  calibrateSensor(MQ135, RatioMQ135CleanAir, "MQ135");
+
+  MQ7.setRegressionMethod(1);
+  MQ7.setA(99.042); MQ7.setB(-1.518);
+  MQ7.init();
+  calibrateSensor(MQ7, RatioMQ7CleanAir, "MQ7");
+
+  GP2.init(sharpLEDPin, sharpVoPin, K, N);
+
+  Serial.println("Sensors initialized");
+}
+
+// Function to calibrate each sensor
+void calibrateSensor(MQUnifiedsensor& sensor, float ratioCleanAir, const char* sensorName) {
+  Serial.print("Calibrating ");
+  Serial.print(sensorName);
+  Serial.print(" sensor, please wait.");
+  float calcR0 = 0;
+  for(int i = 1; i <= 10; i++) {
+    sensor.update();
+    calcR0 += sensor.calibrate(ratioCleanAir);
+    Serial.print(".");
+  }
+  sensor.setR0(calcR0 / 10);
+  Serial.println(" done!");
+
+  if (isinf(calcR0)) {
+    Serial.print("Warning: Connection issue with ");
+    Serial.print(sensorName);
+    Serial.println(", R0 is infinite (Open circuit detected). Please check your wiring and supply.");
+    while (1);
+  }
+  if (calcR0 == 0) {
+    Serial.print("Warning: Connection issue with ");
+    Serial.print(sensorName);
+    Serial.println(", R0 is zero (Analog pin shorts to ground). Please check your wiring and supply.");
+    while (1);
+  }
+}
+
+// Function to read and print all sensor data
+void readAllSensors() {
+  // MQ135
+  MQ135.update();
+  float ppmMQ135 = MQ135.readSensor();
+  Serial.print("MQ135 - CO2 Concentration: ");
+  Serial.print(ppmMQ135);
+  Serial.println(" PPM");
+  Blynk.virtualWrite(V0, ppmMQ135);
+
+  // MQ7
+  MQ7.update();
+  float ppmMQ7 = MQ7.readSensor();
+  Serial.print("MQ7 - CO Concentration: ");
+  Serial.print(ppmMQ7);
+  Serial.println(" PPM");
+  Blynk.virtualWrite(V1, ppmMQ7);
+
+  // Dust Sensor
+  float mvolt, density;
+  GP2.read(&density, &mvolt);
+  Serial.print("Dust Sensor - Vo=");
+  Serial.print(mvolt * 1000);
+  Serial.print("mV, Dust Density=");
+  Serial.print(density);
+  Serial.println("ug/m3");
+  Blynk.virtualWrite(V2, density);
+}
+
+void loop() {
+  Blynk.run();
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - lastReadTime >= readInterval) {
+    lastReadTime = currentMillis;
+    readAllSensors(); // Read all sensors every 1 second
+  }
+}
